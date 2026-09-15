@@ -1,0 +1,211 @@
+/**
+ * @deepseek-ai/dsh-channel-wecom — the WeCom robot channel. One long connection
+ * dials outward to the WeCom gateway, admits direct-message text into the
+ * conversation's own root Session, and streams the Agent's answer back into the
+ * same chat.
+ *
+ * @module @deepseek-ai/dsh-channel-wecom
+ */
+
+import { isAbsolute } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-credentials'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-session-persistence'
+import z from '@deepseek-ai/schemastery'
+import type { BaseMessage, Logger, TextMessage, VoiceMessage, WsFrame } from '@wecom/aibot-node-sdk'
+import { WeComReplies } from './outbound.ts'
+import { WeComSessionBinder } from './session.ts'
+import { WeComTransport } from './transport.ts'
+import type { WeComInbound } from './types.ts'
+
+export * from './types.ts'
+
+/** Stable Cordis plugin name. */
+export const name = 'channel-wecom'
+
+/** Host services that must exist before this connector can serve traffic. */
+export const inject = ['agents', 'credentials', 'permissionPresets', 'sessionPersistence']
+
+/** One robot account served over the WeCom long connection. */
+export interface Config {
+  /** Stable account identity carried into provenance and logs. */
+  accountId: string
+  /** Credential reference holding the robot BotID. */
+  botIdRef: string
+  /** Credential reference holding the robot Secret. */
+  secretRef: string
+  /** Absolute working directory for Sessions this channel creates. */
+  workspacePath: string
+  /** Agent preset mounted on every Agent this connector composes. */
+  agentPreset?: string
+  /** Permission preset applied to a newly created Session. */
+  permissionPreset: string
+  /** Explicit provider and model route; omission keeps the deployment default. */
+  model?: {
+    /** Provider route for every Session this connector creates. */
+    provider: string
+    /** Model served on that route. */
+    model: string
+    /** Output-token ceiling for one root request. */
+    maxTokens?: number
+  }
+  /** Direct-message policy: admit listed senders, or admit none. */
+  dmPolicy: 'allowlist' | 'disabled'
+  /** Sender userids admitted under the allowlist policy. */
+  allowFrom: string[]
+  /** Heartbeat interval in milliseconds. */
+  heartbeatIntervalMs: number
+  /** Reconnection attempt ceiling; `-1` retries without bound. */
+  maxReconnectAttempts: number
+  /** Consecutive authentication-failure ceiling; `-1` retries without bound. */
+  maxAuthFailureAttempts: number
+  /** Reply queue ceiling for one inbound request id. */
+  maxReplyQueueSize: number
+  /** Minimum interval between streamed reply updates. */
+  streamIntervalMs: number
+}
+
+export const Config: z<Config> = z.object({
+  accountId: z.string().required(),
+  botIdRef: z.string().required(),
+  secretRef: z.string().required(),
+  workspacePath: z.string().required(),
+  agentPreset: z.string(),
+  permissionPreset: z.string().default('read-only'),
+  model: z.object({
+    provider: z.string().required(),
+    model: z.string().required(),
+    maxTokens: z.number().step(1).min(1),
+  }),
+  dmPolicy: z.union(['allowlist', 'disabled'] as const).default('allowlist'),
+  allowFrom: z.array(String).default([]),
+  heartbeatIntervalMs: z.number().step(1).min(1000).default(30_000),
+  maxReconnectAttempts: z.number().step(1).default(10),
+  maxAuthFailureAttempts: z.number().step(1).default(5),
+  maxReplyQueueSize: z.number().step(1).min(1).default(500),
+  streamIntervalMs: z.number().step(1).min(50).default(800),
+})
+
+/** Bounded memory of provider message ids already admitted. */
+const SEEN_LIMIT = 1000
+
+/** Normalize one inbound message into prompt text, or `undefined` when M1 does not admit it. */
+function normalize(message: BaseMessage): WeComInbound | undefined {
+  if (message.chattype !== 'single') return undefined
+  let text: string
+  if (message.msgtype === 'text') {
+    text = (message as TextMessage).text.content
+  } else if (message.msgtype === 'voice') {
+    text = (message as VoiceMessage).voice.content
+  } else {
+    return undefined
+  }
+  const quote = message.quote
+  if (quote?.msgtype === 'text' && quote.text !== undefined) {
+    text = `> ${quote.text.content}\n\n${text}`
+  }
+  const trimmed = text.trim()
+  if (trimmed === '') return undefined
+  return {
+    conversationId: message.from.userid,
+    senderId: message.from.userid,
+    messageId: message.msgid,
+    text: trimmed,
+  }
+}
+
+/** Resolve one required credential, failing loud when the reference is unset. */
+async function resolveCredential(ctx: Context, ref: string): Promise<string> {
+  const resolved = await ctx.credentials.resolve(credentialRef(ref))
+  if (resolved === undefined) {
+    throw new Error(`wecom channel: credential "${ref}" is not set`)
+  }
+  return resolved.value
+}
+
+/**
+ * Mount the WeCom channel for one robot account.
+ * @param ctx - plugin context that owns every effect this connector registers.
+ * @param config - validated account, policy, transport, and routing values.
+ */
+export async function apply(ctx: Context, config: Config): Promise<void> {
+  if (!isAbsolute(config.workspacePath)) {
+    throw new TypeError(`wecom channel: workspacePath must be absolute, got ${JSON.stringify(config.workspacePath)}`)
+  }
+  if (config.dmPolicy === 'allowlist' && config.allowFrom.length === 0) {
+    throw new Error('wecom channel: dmPolicy "allowlist" requires at least one allowFrom entry')
+  }
+  const botId = await resolveCredential(ctx, config.botIdRef)
+  const secret = await resolveCredential(ctx, config.secretRef)
+  const admitted = new Set(config.allowFrom)
+  const seen = new Set<string>()
+  const seenOrder: string[] = []
+  const binder = new WeComSessionBinder(ctx, config.accountId, {
+    workspacePath: config.workspacePath,
+    ...config.agentPreset === undefined ? {} : { agentPreset: config.agentPreset },
+    permissionPreset: config.permissionPreset,
+    ...config.model === undefined ? {} : { agentOptions: config.model },
+  })
+  const logger: Logger = {
+    debug: message => { ctx.logger.debug(message) },
+    info: message => { ctx.logger.info(message) },
+    warn: message => { ctx.logger.warn(message) },
+    error: message => { ctx.logger.error(message) },
+  }
+  const transport = new WeComTransport(logger, {
+    onMessage: (frame) => {
+      void admit(frame).catch((error: unknown) => {
+        ctx.logger.warn(`wecom channel: inbound message failed: ${errorChain(error)}`)
+      })
+    },
+    onError: (error) => {
+      ctx.logger.warn(`wecom channel: connection error: ${errorChain(error)}`)
+    },
+  })
+  const replies = new WeComReplies(ctx, transport, config.streamIntervalMs)
+
+  async function admit(frame: WsFrame<BaseMessage>): Promise<void> {
+    const message = frame.body
+    if (message === undefined) return
+    const inbound = normalize(message)
+    if (inbound === undefined) return
+    if (config.dmPolicy !== 'allowlist' || !admitted.has(inbound.senderId)) return
+    if (seen.has(inbound.messageId)) return
+    seen.add(inbound.messageId)
+    seenOrder.push(inbound.messageId)
+    if (seenOrder.length > SEEN_LIMIT) {
+      const evicted = seenOrder.shift()
+      if (evicted !== undefined) seen.delete(evicted)
+    }
+    const agent = await binder.resolve(inbound.conversationId)
+    replies.begin(inbound.conversationId, frame, agent.session.id)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: inbound.text }],
+      source: {
+        kind: 'wecom',
+        accountId: config.accountId,
+        conversationId: inbound.conversationId,
+        senderId: inbound.senderId,
+        messageId: inbound.messageId,
+      },
+    }))
+  }
+
+  ctx.effect(() => async () => {
+    transport.stop()
+    replies.dispose()
+    await binder.dispose()
+  })
+  transport.start({
+    botId,
+    secret,
+    heartbeatIntervalMs: config.heartbeatIntervalMs,
+    maxReconnectAttempts: config.maxReconnectAttempts,
+    maxAuthFailureAttempts: config.maxAuthFailureAttempts,
+    maxReplyQueueSize: config.maxReplyQueueSize,
+  })
+  ctx.logger.info(`wecom channel: connected account "${config.accountId}" over the long connection`)
+}
