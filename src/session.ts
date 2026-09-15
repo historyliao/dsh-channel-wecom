@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { brandString } from '@deepseek-ai/dsh-brand'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -41,7 +40,8 @@ interface Binding {
  */
 export function wecomSessionId(accountId: string, conversationId: string): SessionId {
   const digest = createHash('sha256').update(`${accountId}\u0000${conversationId}`).digest('hex').slice(0, 32)
-  return brandString<SessionId>(`wecom-${digest}`)
+  // Branding is a compile-time device; the runtime value is the plain string.
+  return `wecom-${digest}` as SessionId
 }
 
 /** Resolve, resume, or create the one Session bound to each conversation. */

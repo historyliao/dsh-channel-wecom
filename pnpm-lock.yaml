@@ -21,9 +21,6 @@ importers:
       '@deepseek-ai/dsh-agent-presets':
         specifier: link:../deepseek-harness/packages/preset/agent-presets
         version: link:../deepseek-harness/packages/preset/agent-presets
-      '@deepseek-ai/dsh-brand':
-        specifier: link:../deepseek-harness/packages/util/brand
-        version: link:../deepseek-harness/packages/util/brand
       '@deepseek-ai/dsh-credentials':
         specifier: link:../deepseek-harness/packages/credentials/credentials
         version: link:../deepseek-harness/packages/credentials/credentials
