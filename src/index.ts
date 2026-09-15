@@ -45,15 +45,12 @@ export interface Config {
   agentPreset?: string
   /** Permission preset applied to a newly created Session. */
   permissionPreset: string
-  /** Explicit provider and model route; omission keeps the deployment default. */
-  model?: {
-    /** Provider route for every Session this connector creates. */
-    provider: string
-    /** Model served on that route. */
-    model: string
-    /** Output-token ceiling for one root request. */
-    maxTokens?: number
-  }
+  /** Provider route for every Session this connector creates; set with `modelId`. */
+  modelProvider?: string
+  /** Model served on that route; set with `modelProvider`. */
+  modelId?: string
+  /** Output-token ceiling for one root request. */
+  maxTokens?: number
   /** Direct-message policy: admit everyone, pair unknown senders, admit listed senders, or admit none. */
   dmPolicy: 'open' | 'pairing' | 'allowlist' | 'disabled'
   /** Sender userids admitted without pairing. */
@@ -79,11 +76,9 @@ export const Config: z<Config> = z.object({
   workspacePath: z.string().required(),
   agentPreset: z.string(),
   permissionPreset: z.string().default('read-only'),
-  model: z.object({
-    provider: z.string().required(),
-    model: z.string().required(),
-    maxTokens: z.number().step(1).min(1),
-  }),
+  modelProvider: z.string(),
+  modelId: z.string(),
+  maxTokens: z.number().step(1).min(1),
   dmPolicy: z.union(['open', 'pairing', 'allowlist', 'disabled'] as const).default('allowlist'),
   allowFrom: z.array(String).default([]),
   pairingStorePath: z.string().default('.wecom-pairing.json'),
@@ -148,6 +143,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (config.dmPolicy === 'allowlist' && config.allowFrom.length === 0) {
     throw new Error('wecom channel: dmPolicy "allowlist" requires at least one allowFrom entry')
   }
+  if ((config.modelProvider === undefined) !== (config.modelId === undefined)) {
+    throw new Error('wecom channel: modelProvider and modelId must be set together')
+  }
+  const agentOptions = config.modelProvider === undefined || config.modelId === undefined
+    ? undefined
+    : {
+      provider: config.modelProvider,
+      model: config.modelId,
+      ...config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens },
+    }
   const botId = await resolveCredential(ctx, config.botIdRef)
   const secret = await resolveCredential(ctx, config.secretRef)
   const admitted = new Set(config.allowFrom)
@@ -159,7 +164,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     workspacePath: config.workspacePath,
     ...config.agentPreset === undefined ? {} : { agentPreset: config.agentPreset },
     permissionPreset: config.permissionPreset,
-    ...config.model === undefined ? {} : { agentOptions: config.model },
+    ...agentOptions === undefined ? {} : { agentOptions },
   })
   const logger: Logger = {
     debug: message => { ctx.logger.debug(message) },

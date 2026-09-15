@@ -41,7 +41,7 @@ Set `WECOM_BOT_ID` and `WECOM_BOT_SECRET` in the environment, `$DSH_HOME/.creden
 | `workspacePath` | Absolute working directory for this channel's Sessions |
 | `agentPreset` | Agent preset mounted on every Agent this connector composes |
 | `permissionPreset` | Permission preset applied to a newly created Session; defaults to `read-only` |
-| `model` | Optional explicit `provider`, `model`, and `maxTokens` |
+| `modelProvider` / `modelId` / `maxTokens` | Optional explicit model route; set the first two together |
 | `dmPolicy` / `allowFrom` | `open`, `pairing`, `allowlist`, or `disabled`, plus the sender userids admitted without pairing |
 | `pairingStorePath` | JSON document holding approved senders and pending requests; defaults to `.wecom-pairing.json` |
 | `heartbeatIntervalMs`, `maxReconnectAttempts`, `maxAuthFailureAttempts`, `maxReplyQueueSize` | Transport dials forwarded to the SDK |

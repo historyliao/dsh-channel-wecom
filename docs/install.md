@@ -68,7 +68,8 @@ Optional keys, with their defaults:
 |---|---|---|
 | `permissionPreset` | `read-only` | Permission preset applied to a newly created Session |
 | `agentPreset` | — | Agent preset mounted on every Agent this connector composes; requires the agent-presets service |
-| `model` | deployment default | Explicit `provider`, `model`, and optional `maxTokens` |
+| `modelProvider` / `modelId` | deployment default | Explicit model route; set both together |
+| `maxTokens` | — | Output-token ceiling for one root request |
 | `heartbeatIntervalMs` | `30000` | Heartbeat interval |
 | `maxReconnectAttempts` | `10` | Reconnection ceiling; `-1` retries without bound |
 | `maxAuthFailureAttempts` | `5` | Consecutive authentication-failure ceiling; `-1` retries without bound |
