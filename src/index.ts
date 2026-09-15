@@ -7,7 +7,7 @@
  * @module @deepseek-ai/dsh-channel-wecom
  */
 
-import { isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-credentials'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -16,7 +16,9 @@ import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import z from '@deepseek-ai/schemastery'
 import type { BaseMessage, Logger, TextMessage, VoiceMessage, WsFrame } from '@wecom/aibot-node-sdk'
+import { generateReqId } from '@wecom/aibot-node-sdk'
 import { WeComReplies } from './outbound.ts'
+import { PairingStore } from './pairing.ts'
 import { WeComSessionBinder } from './session.ts'
 import { WeComTransport } from './transport.ts'
 import type { WeComInbound } from './types.ts'
@@ -52,10 +54,12 @@ export interface Config {
     /** Output-token ceiling for one root request. */
     maxTokens?: number
   }
-  /** Direct-message policy: admit listed senders, or admit none. */
-  dmPolicy: 'allowlist' | 'disabled'
-  /** Sender userids admitted under the allowlist policy. */
+  /** Direct-message policy: admit everyone, pair unknown senders, admit listed senders, or admit none. */
+  dmPolicy: 'open' | 'pairing' | 'allowlist' | 'disabled'
+  /** Sender userids admitted without pairing. */
   allowFrom: string[]
+  /** Pairing document holding approved senders and pending requests. */
+  pairingStorePath: string
   /** Heartbeat interval in milliseconds. */
   heartbeatIntervalMs: number
   /** Reconnection attempt ceiling; `-1` retries without bound. */
@@ -80,8 +84,9 @@ export const Config: z<Config> = z.object({
     model: z.string().required(),
     maxTokens: z.number().step(1).min(1),
   }),
-  dmPolicy: z.union(['allowlist', 'disabled'] as const).default('allowlist'),
+  dmPolicy: z.union(['open', 'pairing', 'allowlist', 'disabled'] as const).default('allowlist'),
   allowFrom: z.array(String).default([]),
+  pairingStorePath: z.string().default('.wecom-pairing.json'),
   heartbeatIntervalMs: z.number().step(1).min(1000).default(30_000),
   maxReconnectAttempts: z.number().step(1).default(10),
   maxAuthFailureAttempts: z.number().step(1).default(5),
@@ -117,6 +122,11 @@ function normalize(message: BaseMessage): WeComInbound | undefined {
   }
 }
 
+/** Reply shown to a sender who is waiting for approval. */
+function pairingPrompt(senderId: string, code: string): string {
+  return `您的企业微信用户ID：${senderId}\n配对码：${code}\n\n请让管理员批准该配对码后再发消息。`
+}
+
 /** Resolve one required credential, failing loud when the reference is unset. */
 async function resolveCredential(ctx: Context, ref: string): Promise<string> {
   const resolved = await ctx.credentials.resolve(credentialRef(ref))
@@ -141,6 +151,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const botId = await resolveCredential(ctx, config.botIdRef)
   const secret = await resolveCredential(ctx, config.secretRef)
   const admitted = new Set(config.allowFrom)
+  const pairingStorePath = resolve(config.pairingStorePath)
+  const pairing = config.dmPolicy === 'pairing' ? new PairingStore(pairingStorePath) : undefined
   const seen = new Set<string>()
   const seenOrder: string[] = []
   const binder = new WeComSessionBinder(ctx, config.accountId, {
@@ -172,7 +184,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (message === undefined) return
     const inbound = normalize(message)
     if (inbound === undefined) return
-    if (config.dmPolicy !== 'allowlist' || !admitted.has(inbound.senderId)) return
+    if (!(await admitSender(frame, inbound))) return
     if (seen.has(inbound.messageId)) return
     seen.add(inbound.messageId)
     seenOrder.push(inbound.messageId)
@@ -192,6 +204,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         messageId: inbound.messageId,
       },
     }))
+  }
+
+  async function admitSender(frame: WsFrame<BaseMessage>, inbound: WeComInbound): Promise<boolean> {
+    if (config.dmPolicy === 'open') return true
+    if (config.dmPolicy === 'disabled') return false
+    if (admitted.has(inbound.senderId) || pairing?.isApproved(inbound.senderId) === true) return true
+    if (pairing === undefined) {
+      ctx.logger.warn(`wecom channel: dropped message from unlisted sender "${inbound.senderId}"`)
+      return false
+    }
+    const { code, created } = pairing.request(inbound.senderId)
+    if (!created) return false
+    ctx.logger.warn(`wecom channel: pairing request ${code} from "${inbound.senderId}"; approve it in ${pairingStorePath}`)
+    try {
+      await transport.replyStream(frame, generateReqId('stream'), pairingPrompt(inbound.senderId, code), true)
+    } catch (error: unknown) {
+      ctx.logger.warn(`wecom channel: pairing reply failed: ${errorChain(error)}`)
+    }
+    return false
   }
 
   ctx.effect(() => async () => {

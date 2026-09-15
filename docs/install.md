@@ -77,6 +77,19 @@ Optional keys, with their defaults:
 
 To configure a different account, add another row with its own `id`, `accountId`, and credentials.
 
+### Direct-message policies
+
+`dmPolicy` decides who may talk to the robot. It applies to direct messages only; the message text of a rejected sender never reaches the model.
+
+| Value | Behavior |
+|---|---|
+| `open` | Admit every sender. |
+| `pairing` | Admit senders in `allowFrom` or already approved in the pairing document. An unknown sender gets one reply naming their own WeCom userid and a six-digit pairing code, and their message is dropped. |
+| `allowlist` | Admit senders in `allowFrom` or already approved in the pairing document; drop everyone else. |
+| `disabled` | Drop every direct message. |
+
+Under `pairing`, approvals live in the pairing document rather than in configuration: the connector writes each request into `pairingStorePath` and logs a line naming the code and the file. To approve someone, add their userid to that document's `approved` array (or simply add it to `allowFrom`); they are admitted on their next message without a restart.
+
 ## Step 4 — Restart the profile
 
 ```sh
