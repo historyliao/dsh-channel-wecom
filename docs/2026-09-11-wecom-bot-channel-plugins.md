@@ -1,6 +1,6 @@
 # Agent Note: WeCom bot channel as installable Cordis plugins
 
-Status: proposed
+Status: implemented
 
 English | [中文](2026-09-11-wecom-bot-channel-plugins.zh.md)
 
@@ -8,7 +8,7 @@ English | [中文](2026-09-11-wecom-bot-channel-plugins.zh.md)
 
 DSH reaches people through the Web application, the SDK, and ACP. A team that works inside WeCom cannot start or continue an Agent conversation there.
 
-The extension point that already turns external events into Agent work, `ctx.webhookRuntime`, deliberately does not fit. It creates a new root Session per verified delivery, never reads the reply, and owns no outbound channel ([Webhook subsystem](../../../../docs/subsystems/webhook.md)). A chat channel needs one stable Session per conversation plus a path that carries the answer back into the same chat.
+The extension point that already turns external events into Agent work, `ctx.webhookRuntime`, deliberately does not fit. It creates a new root Session per verified delivery, never reads the reply, and owns no outbound channel ([Webhook subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/webhook.md)). A chat channel needs one stable Session per conversation plus a path that carries the answer back into the same chat.
 
 WeCom's API-mode robot provides a long-connection mode ([help document 21661](https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21661)). The operator's server dials `wss://` outward, authenticates with `aibot_subscribe` using the robot's BotID and Secret, keeps the link alive with a heartbeat of roughly thirty seconds, and pushes reply segments until it sets `finish`. The mode needs no public URL, no signature verification, and no message decryption, so an internal-network deployment can host it.
 
@@ -16,9 +16,9 @@ WeCom's API-mode robot provides a long-connection mode ([help document 21661](ht
 
 ### Ship as plugins
 
-The capability is one bundle plus its plugin rows, mounted into whichever long-lived profile an operator runs. It adds no application launcher, edits no core package, and takes no new `ctx` key: every registration is an effect that unwinds when its row unloads. The code lives under `packages/channel/wecom` and `packages/bundle/wecom`.
+The capability is one plugin mounted into whichever long-lived profile an operator runs. It adds no application launcher, edits no core package of the host harness, and takes no new `ctx` key: every registration is an effect that unwinds when its row unloads. The code lives in this repository's `src/` and publishes as `@ezreal_lyy/dsh-channel-wecom`.
 
-Only one channel exists, so `packages/channel/wecom` keeps transport, policy, routing, and delivery together. A `ctx.channels` capability seam earns its place when a second channel needs the same Service Definition, provider, and consumer roles; extracting it then is cheaper than guessing its interface now.
+Only one channel exists, so this package keeps transport, policy, routing, and delivery together. A `ctx.channels` capability seam earns its place when a second channel needs the same Service Definition, provider, and consumer roles; extracting it then is cheaper than guessing its interface now.
 
 The webhook runtime and its GitHub adapter keep their published contracts unchanged. This proposal supersedes no active Agent Note, and landing it moves no archived note.
 
@@ -26,8 +26,7 @@ The webhook runtime and its GitHub adapter keep their published contracts unchan
 
 | Package | Role | Registers |
 |---|---|---|
-| `@deepseek-ai/dsh-channel-wecom` | Long connection, policy, Session binding, inbound normalization, streamed replies | the connector's effect tree |
-| `@deepseek-ai/dsh-bundle-wecom` | Distribution layer carrying the rows and their validated defaults | `dsh.bundle` patch |
+| `@ezreal_lyy/dsh-channel-wecom` | Long connection, policy, Session binding, inbound normalization, streamed replies | the connector's effect tree |
 | `@deepseek-ai/dsh-tool-wecom-cli` | Deferred model-facing `wecom_cli` tool | `ctx.tools` |
 | `@deepseek-ai/dsh-skill-wecom-cli` | Deferred wecom-cli instruction provider | `ctx.skills` |
 
@@ -35,11 +34,11 @@ The webhook runtime and its GitHub adapter keep their published contracts unchan
 
 The connector wraps `@wecom/aibot-node-sdk` instead of implementing the wire protocol. The SDK already covers subscription, heartbeat with missed-acknowledgement tracking, bounded reconnection, auth-failure retry bounds, reply queueing, chunked media upload, and streamed replies, so the plugin owns configuration and lifecycle rather than framing.
 
-The robot's BotID and Secret appear only as credential references, which `ctx.credentials` resolves per operation ([credentials group](../../../../packages/credentials/README.md)); a rotated value applies to the next message without a restart.
+The robot's BotID and Secret appear only as credential references, which `ctx.credentials` resolves per operation ([credentials group](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/credentials/README.md)); a rotated value applies to the next message without a restart.
 
 ### Session binding
 
-A conversation maps to one Session identity derived deterministically from the account and the conversation address, so binding needs no side table and survives a restart. On an inbound message the connector resolves a live Agent by that identity, resumes a persisted Session when none is live, and creates one otherwise; creation supplies the configured workspace as the Session cwd, mounts the agent preset through `setup`, and passes the optional model route to `agentOptions` ([Agent handle](../../../../packages/core/agent/README.md)).
+A conversation maps to one Session identity derived deterministically from the account and the conversation address, so binding needs no side table and survives a restart. On an inbound message the connector resolves a live Agent by that identity, resumes a persisted Session when none is live, and creates one otherwise; creation supplies the configured workspace as the Session cwd, mounts the agent preset through `setup`, and passes the optional model route to `agentOptions` ([Agent handle](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent/README.md)).
 
 The connector holds the returned handle, which is the only object that can tear its Agent down. Unloading the row therefore disposes the Agents it created while leaving their Sessions on disk for the next resume.
 
@@ -57,9 +56,9 @@ A WeCom stream becomes unusable after roughly six minutes and reports `846608`. 
 
 ### Provenance and session format
 
-The followup carries a message source naming the channel, account, conversation, sender, and provider message id. The connector adds that variant by declaration merging on `MessageSourceMap`, the merge-extensible union the LLM vocabulary publishes ([message source](../../../../packages/llm/llm/src/message.ts)).
+The followup carries a message source naming the channel, account, conversation, sender, and provider message id. The connector adds that variant by declaration merging on `MessageSourceMap`, the merge-extensible union the LLM vocabulary publishes ([message source](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm/src/message.ts)).
 
-No session event is added and the session format is unchanged. The released-format migration's closed source list describes what an already-published generation can contain, so a new producer variant does not belong in it ([migration source list](../../../../packages/session/session-format-v2-to-v3/src/payload.ts)).
+No session event is added and the session format is unchanged. The released-format migration's closed source list describes what an already-published generation can contain, so a new producer variant does not belong in it ([migration source list](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session/session-format-v2-to-v3/src/payload.ts)).
 
 ### Configuration
 
@@ -79,13 +78,13 @@ No session event is added and the session format is unchanged. The released-form
 
 ### Composition
 
-The bundle patch inserts the connector row; deployment values arrive from the profile's own `cordis.patch.yml` or a `--patch` overlay ([plugin installation](../../../../docs/user/develop/basic/publish.md)). A profile created from the `web` template carries the browser surface and the channel side by side without a code change.
+The package installs into a profile through `dsh plugin`; deployment values arrive from the profile's own `cordis.patch.yml` or a `--patch` overlay ([plugin installation](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)). A profile created from the `web` template carries the browser surface and the channel side by side without a code change.
 
-The row needs only services the [base bundle](../../../../packages/bundle/base/cordis.patch.yml) already provides, and requires neither the HTTP server nor the Workspace registry: the long connection dials outward, and the connector supplies each Session's working directory. A profile missing a required service fails while loading.
+The row needs only services the [base bundle](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/base/cordis.patch.yml) already provides, and requires neither the HTTP server nor the Workspace registry: the long connection dials outward, and the connector supplies each Session's working directory. A profile missing a required service fails while loading.
 
 ### Lifecycle and hot swap
 
-Under `patchReload: live`, a valid edit to either patch file recomposes transactionally, and the Loader diffs each entry: unchanged rows keep running, while an edited row restarts its plugin fiber ([app boot](../../../../packages/boot/app-boot/README.md)). The connector therefore treats unload and re-apply as an ordinary path. Disposal disconnects the socket, stops the heartbeat, and releases the Agent handles it created; re-application reconnects and resumes the same Sessions on the next inbound message. A rejected edit leaves the last good tree running.
+Under `patchReload: live`, a valid edit to either patch file recomposes transactionally, and the Loader diffs each entry: unchanged rows keep running, while an edited row restarts its plugin fiber ([app boot](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/boot/app-boot/README.md)). The connector therefore treats unload and re-apply as an ordinary path. Disposal disconnects the socket, stops the heartbeat, and releases the Agent handles it created; re-application reconnects and resumes the same Sessions on the next inbound message. A rejected edit leaves the last good tree running.
 
 Installing a new bundle changes the profile manifest's bundle list, which the patch watcher does not observe, so that step needs a process restart.
 
@@ -100,7 +99,7 @@ Turns only on boot, configuration change, link failure, and shutdown.
   Configuration sources
       |
       | profile/cordis.patch.yml (bundle layers, then profile layer, then --patch)
-      | dsh plugin --profile wecom add <bundle>
+      | dsh plugin --profile wecom add <package>
       v
   dsh launcher and Loader
       |
@@ -195,7 +194,7 @@ Four one-directional couplings connect the planes: the data plane reads the poli
 
 **Bridge the runtime from a separate process over the TypeScript SDK.** This keeps DSH untouched, but it is not a plugin, it cannot register approval or question answerers, and its notification stream carries durable Session events rather than the transient assistant frames a streamed reply depends on.
 
-**Extend `ctx.webhookRuntime` with a reply path.** The runtime's published contract is fire-and-forget with one Session per delivery and no stored delivery or completion state ([fire-and-forget webhook Sessions](../../../../.agents/notes/implemented/feature/2026-08-22-fire-and-forget-webhook-sessions.md)). Conversation continuity and an outbound channel would add a second lifecycle to a package that deliberately owns none.
+**Extend `ctx.webhookRuntime` with a reply path.** The runtime's published contract is fire-and-forget with one Session per delivery and no stored delivery or completion state ([fire-and-forget webhook Sessions](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/feature/2026-08-22-fire-and-forget-webhook-sessions.md)). Conversation continuity and an outbound channel would add a second lifecycle to a package that deliberately owns none.
 
 **Introduce a `ctx.channels` capability seam now.** One channel exists, so the Consumer role would have no second implementer and the interface would encode guesses about transports, policies, and delivery that the second channel may contradict.
 
@@ -214,7 +213,7 @@ Four one-directional couplings connect the planes: the data plane reads the poli
 - A stream reporting `846608` ends with exactly one remaining-text delivery and no repeated text.
 - The final reply equals the committed durable assistant message rather than the accumulated transient frames.
 - Under a live-reload profile, editing an unrelated row leaves the connection up, while editing the connector's own row restarts it and the next message resumes the same Session.
-- The change adds no session event and no session-format version bump, and keyless snapshot tests pin the admitted user message with its provenance.
+- The change adds no session event and no session-format version bump. Automated coverage is not part of this stage: the package ships without unit or snapshot tests, and `pnpm run build` is the only check.
 
 ## Risks
 
