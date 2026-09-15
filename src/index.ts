@@ -55,8 +55,6 @@ export interface Config {
   dmPolicy: 'open' | 'pairing' | 'allowlist' | 'disabled'
   /** Sender userids admitted without pairing. */
   allowFrom: string[]
-  /** Sender userids allowed to approve pairing requests from the chat. */
-  operatorIds: string[]
   /** Pairing document holding approved senders and pending requests. */
   pairingStorePath: string
   /** Heartbeat interval in milliseconds. */
@@ -83,7 +81,6 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().step(1).min(1),
   dmPolicy: z.union(['open', 'pairing', 'allowlist', 'disabled'] as const).default('allowlist'),
   allowFrom: z.array(String).default([]),
-  operatorIds: z.array(String).default([]),
   pairingStorePath: z.string().default('.wecom-pairing.json'),
   heartbeatIntervalMs: z.number().step(1).min(1000).default(30_000),
   maxReconnectAttempts: z.number().step(1).default(10),
@@ -146,9 +143,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (config.dmPolicy === 'allowlist' && config.allowFrom.length === 0) {
     throw new Error('wecom channel: dmPolicy "allowlist" requires at least one allowFrom entry')
   }
-  if (config.dmPolicy === 'pairing' && config.operatorIds.length === 0) {
-    throw new Error('wecom channel: dmPolicy "pairing" requires at least one operatorIds entry to approve requests')
-  }
   if ((config.modelProvider === undefined) !== (config.modelId === undefined)) {
     throw new Error('wecom channel: modelProvider and modelId must be set together')
   }
@@ -162,7 +156,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const botId = await resolveCredential(ctx, config.botIdRef)
   const secret = await resolveCredential(ctx, config.secretRef)
   const admitted = new Set(config.allowFrom)
-  const operators = new Set(config.operatorIds)
   const pairingStorePath = resolve(config.pairingStorePath)
   const pairing = new PairingStore(pairingStorePath)
   const seen = new Set<string>()
@@ -220,15 +213,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   async function handleApproval(frame: WsFrame<BaseMessage>, inbound: WeComInbound): Promise<boolean> {
-    if (!operators.has(inbound.senderId)) return false
     const match = /^approve\s+(\d{6})$/i.exec(inbound.text)
     if (match === null) return false
     const code = match[1] ?? ''
-    const senderId = pairing.approve(code)
-    const text = senderId === undefined
-      ? `没有待批准的配对码 ${code}。`
-      : `已批准 ${senderId}，对方下一条消息即可正常对话。`
-    ctx.logger.info(`wecom channel: operator ${inbound.senderId} approved code ${code}: ${text}`)
+    const approved = pairing.approve(code, inbound.senderId)
+    const text = approved === undefined
+      ? `没有属于你的待批准配对码 ${code}。`
+      : `配对成功，${approved} 已获授权，下一条消息即可正常对话。`
+    ctx.logger.info(`wecom channel: pairing ${approved === undefined ? 'rejected' : 'approved'} for ${inbound.senderId} with code ${code}`)
     try {
       await transport.replyStream(frame, generateReqId('stream'), text, true)
     } catch (error: unknown) {

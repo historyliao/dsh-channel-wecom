@@ -77,11 +77,14 @@ export class PairingStore {
 
   /**
    * Approve one pending request by its code.
+   * The code is only ever delivered to the requester, so approval additionally
+   * requires the same sender, which keeps one sender from approving another's request.
    * @param code - code shown to the requester.
-   * @returns the approved userid, or undefined when no request carries that code.
+   * @param senderId - sender asking to approve.
+   * @returns the approved userid, or undefined when no request matches both.
    */
-  approve(code: string): string | undefined {
-    const index = this.state.pending.findIndex(entry => entry.code === code)
+  approve(code: string, senderId: string): string | undefined {
+    const index = this.state.pending.findIndex(entry => entry.code === code && entry.senderId === senderId)
     if (index === -1) return undefined
     const [request] = this.state.pending.splice(index, 1)
     if (request === undefined) return undefined

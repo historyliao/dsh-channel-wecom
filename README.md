@@ -44,7 +44,6 @@ Set `WECOM_BOT_ID` and `WECOM_BOT_SECRET` in the environment, `$DSH_HOME/.creden
 | `modelProvider` / `modelId` / `maxTokens` | Optional explicit model route; set the first two together |
 | `dmPolicy` / `allowFrom` | `open`, `pairing`, `allowlist`, or `disabled`, plus the sender userids admitted without pairing |
 | `pairingStorePath` | JSON document holding approved senders and pending requests; defaults to `.wecom-pairing.json` |
-| `operatorIds` | Sender userids allowed to approve a pairing request by replying `approve <code>` in the chat |
 | `heartbeatIntervalMs`, `maxReconnectAttempts`, `maxAuthFailureAttempts`, `maxReplyQueueSize` | Transport dials forwarded to the SDK |
 | `streamIntervalMs` | Minimum interval between streamed reply updates |
 
