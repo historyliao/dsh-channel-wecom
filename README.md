@@ -14,6 +14,8 @@ dsh plugin --profile web add @ezreal_lyy/dsh-channel-wecom
 
 Then insert the row into `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
+Full step-by-step instructions, including the local-checkout install path, credential setup, and troubleshooting, are in [docs/install.md](docs/install.md).
+
 ```yaml
 - insert:
     - id: channel-wecom
