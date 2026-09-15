@@ -75,6 +75,21 @@ export class PairingStore {
     return { code: request.code, created: true }
   }
 
+  /**
+   * Approve one pending request by its code.
+   * @param code - code shown to the requester.
+   * @returns the approved userid, or undefined when no request carries that code.
+   */
+  approve(code: string): string | undefined {
+    const index = this.state.pending.findIndex(entry => entry.code === code)
+    if (index === -1) return undefined
+    const [request] = this.state.pending.splice(index, 1)
+    if (request === undefined) return undefined
+    if (!this.state.approved.includes(request.senderId)) this.state.approved.push(request.senderId)
+    this.persist()
+    return request.senderId
+  }
+
   private persist(): void {
     mkdirSync(dirname(this.path), { recursive: true })
     const temporary = `${this.path}.tmp`

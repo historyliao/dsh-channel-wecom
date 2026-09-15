@@ -89,7 +89,12 @@ To configure a different account, add another row with its own `id`, `accountId`
 | `allowlist` | Admit senders in `allowFrom` or already approved in the pairing document; drop everyone else. |
 | `disabled` | Drop every direct message. |
 
-Under `pairing`, approvals live in the pairing document rather than in configuration: the connector writes each request into `pairingStorePath` and logs a line naming the code and the file. To approve someone, add their userid to that document's `approved` array (or simply add it to `allowFrom`); they are admitted on their next message without a restart.
+Under `pairing`, an unknown sender gets their own userid and a six-digit code, and the connector records the request in `pairingStorePath` while logging a line naming the code and the file. Approval has two equivalent routes:
+
+- **From the chat.** A userid listed in `operatorIds` replies `approve <code>`; the connector answers with the result and admits the requester on their next message. Set `operatorIds` to your own userid, which the pairing reply reveals.
+- **From the machine.** Add the requester's userid to the document's `approved` array, or add it to `allowFrom`.
+
+Either route takes effect on the next message with no restart. `dmPolicy: pairing` refuses to load with an empty `operatorIds`, so a deployment cannot strand its users without an approver.
 
 ## Step 4 — Restart the profile
 
