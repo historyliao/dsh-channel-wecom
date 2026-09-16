@@ -89,7 +89,8 @@ export class WeComSessionBinder {
   /**
    * Whether a stored Session exists, across persistence backend versions.
    * `stat` answers directly where the backend provides it; older backends
-   * answer through `list`.
+   * answer through `list`, whose entries carry the header either nested under
+   * `header` or flattened into the entry itself.
    * @param sessionId - durable identity to look up.
    * @returns true when the Session can be resumed instead of created.
    */
@@ -98,8 +99,12 @@ export class WeComSessionBinder {
     if (typeof persistence.stat === 'function') {
       return await persistence.stat(sessionId) !== undefined
     }
-    const snapshots = await persistence.list()
-    return snapshots.some(snapshot => snapshot.header.id === sessionId)
+    const listed: readonly unknown[] = await persistence.list()
+    return listed.some((entry) => {
+      if (entry === null || typeof entry !== 'object') return false
+      const record = entry as { id?: unknown; header?: { id?: unknown } }
+      return (record.header?.id ?? record.id) === sessionId
+    })
   }
 
   /** Dispose every Agent this binder created; already-live Agents stay with their owner. */
