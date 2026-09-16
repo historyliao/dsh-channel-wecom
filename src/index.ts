@@ -238,8 +238,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       return false
     }
     const { code, created } = pairing.request(inbound.senderId)
-    if (!created) return false
-    ctx.logger.warn(`wecom channel: pairing request ${code} from "${inbound.senderId}"; approve it in ${pairingStorePath}`)
+    ctx.logger.warn(`wecom channel: pairing ${created ? 'request' : 'reminder'} ${code} from "${inbound.senderId}"; approve it in ${pairingStorePath}`)
     try {
       await transport.replyStream(frame, generateReqId('stream'), pairingPrompt(inbound.senderId, code), true)
     } catch (error: unknown) {
