@@ -33,6 +33,14 @@ interface Binding {
   readonly handle: AgentHandle | undefined
 }
 
+/** Agent composition shared by the create and resume paths. */
+interface Composition {
+  /** Preset id recorded on a created Session; absent when no preset applies. */
+  readonly presetId: string | undefined
+  /** Pre-publication setup mounting that preset. */
+  readonly setup: AgentSetup
+}
+
 /**
  * Derive the durable Session identity of one robot conversation.
  * @param accountId - configured account identity.
@@ -47,7 +55,7 @@ export function wecomSessionId(accountId: string, conversationId: string): Sessi
 /** Resolve, resume, or create the one Session bound to each conversation. */
 export class WeComSessionBinder {
   private readonly bindings = new Map<string, Binding>()
-  private setup: Promise<AgentSetup> | undefined
+  private composition: Promise<Composition> | undefined
 
   /**
    * @param ctx - plugin context that owns Agents this binder creates.
@@ -74,10 +82,10 @@ export class WeComSessionBinder {
       this.bindings.set(conversationId, { agent: live, handle: undefined })
       return live
     }
-    const setup = await this.composedSetup()
+    const { presetId, setup } = await this.composed()
     const stored = await this.ctx.sessionPersistence.stat(sessionId)
     const handle = stored === undefined
-      ? await this.create(sessionId, setup)
+      ? await this.create(sessionId, presetId, setup)
       : await this.ctx.agents.resume({
         resumeSessionId: sessionId,
         ...this.options.agentOptions === undefined ? {} : { agentOptions: this.options.agentOptions },
@@ -99,13 +107,12 @@ export class WeComSessionBinder {
     }
   }
 
-  private async create(sessionId: SessionId, setup: AgentSetup): Promise<AgentHandle> {
-    const preset = this.options.agentPreset
+  private async create(sessionId: SessionId, presetId: string | undefined, setup: AgentSetup): Promise<AgentHandle> {
     const handle = await this.ctx.agents.create({
       sessionId,
       meta: {
         cwd: this.options.workspacePath,
-        ...preset === undefined ? {} : { agentPreset: preset },
+        ...presetId === undefined ? {} : { agentPreset: presetId },
       },
       ...this.options.agentOptions === undefined ? {} : { agentOptions: this.options.agentOptions },
       setup,
@@ -114,21 +121,25 @@ export class WeComSessionBinder {
     return handle
   }
 
-  private async composedSetup(): Promise<AgentSetup> {
-    this.setup ??= this.buildSetup()
-    return this.setup
+  private async composed(): Promise<Composition> {
+    this.composition ??= this.buildComposition()
+    return this.composition
   }
 
-  private async buildSetup(): Promise<AgentSetup> {
-    const presetId = this.options.agentPreset
-    if (presetId === undefined) return () => {}
+  private async buildComposition(): Promise<Composition> {
     const presets = this.ctx.get('agentPresets')
     if (presets === undefined) {
-      throw new Error('wecom channel: agentPreset requires the agent-presets service (mount @deepseek-ai/dsh-agent-presets)')
+      if (this.options.agentPreset !== undefined) {
+        throw new Error('wecom channel: agentPreset requires the agent-presets service (mount @deepseek-ai/dsh-agent-presets)')
+      }
+      return { presetId: undefined, setup: () => {} }
     }
-    const resolved = (await presets.resolve(presetId)).id
-    return async (agentCtx) => {
-      await presets.mount(agentCtx, resolved)
+    const presetId = (await presets.resolve(this.options.agentPreset)).id
+    return {
+      presetId,
+      setup: async (agentCtx) => {
+        await presets.mount(agentCtx, presetId)
+      },
     }
   }
 }
