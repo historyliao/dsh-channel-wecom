@@ -1,7 +1,7 @@
 {
   "name": "@ezreal_lyy/dsh-channel-wecom",
   "description": "WeCom robot channel for DeepSeek Harness: long-connection transport, conversation-bound Sessions, and streamed replies",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
