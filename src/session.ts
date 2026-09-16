@@ -2,7 +2,9 @@
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent'
+import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { errorChain } from '@deepseek-ai/dsh-llm'
@@ -24,6 +26,8 @@ export interface WeComBindingOptions {
     readonly model: string
     readonly maxTokens?: number
   }
+  /** Route installed for prompt assembly; omission reads the deployment default. */
+  readonly modelSelection?: ModelSelection
 }
 
 /** One resolved conversation: the live Agent plus the handle this connector owns. */
@@ -128,17 +132,17 @@ export class WeComSessionBinder {
 
   private async buildComposition(): Promise<Composition> {
     const presets = this.ctx.get('agentPresets')
-    if (presets === undefined) {
-      if (this.options.agentPreset !== undefined) {
-        throw new Error('wecom channel: agentPreset requires the agent-presets service (mount @deepseek-ai/dsh-agent-presets)')
-      }
-      return { presetId: undefined, setup: () => {} }
+    if (presets === undefined && this.options.agentPreset !== undefined) {
+      throw new Error('wecom channel: agentPreset requires the agent-presets service (mount @deepseek-ai/dsh-agent-presets)')
     }
-    const presetId = (await presets.resolve(this.options.agentPreset)).id
+    const presetId = presets === undefined ? undefined : (await presets.resolve(this.options.agentPreset)).id
+    const configured = this.options.modelSelection
     return {
       presetId,
       setup: async (agentCtx) => {
-        await presets.mount(agentCtx, presetId)
+        if (presets !== undefined && presetId !== undefined) await presets.mount(agentCtx, presetId)
+        const selection = configured ?? this.ctx.agentDefaultModel.currentSelection()
+        installModelSelection(agentCtx, { current: { ...selection }, assembled: undefined })
       },
     }
   }

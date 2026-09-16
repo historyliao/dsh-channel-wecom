@@ -60,14 +60,14 @@ export class WeComReplies {
       if (frame.type === 'end') return
       if (frame.chunk.type !== 'text-delta' || frame.chunk.text === '') return
       this.append(agent, frame.chunk.text)
-    }))
+    }, { global: true }))
     this.disposers.push(ctx.on('session/event', (session, event) => {
       if (event.type === 'assistant/message') {
         this.commit(session, assistantText(event.data.message))
         return
       }
       if (event.type === 'turn/end') void this.close(session)
-    }))
+    }, { global: true }))
   }
 
   /**
@@ -153,6 +153,7 @@ export class WeComReplies {
   }
 
   private enqueue(reply: OpenReply, content: string, finish: boolean): void {
+    this.ctx.logger.debug(`wecom channel: delivering ${finish ? 'final' : 'partial'} reply of ${content.length} chars to ${reply.conversationId}`)
     reply.chain = reply.chain
       .then(async () => {
         const status = await this.transport.replyStream(reply.frame, reply.streamId, content, finish)

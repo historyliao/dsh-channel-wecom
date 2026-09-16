@@ -29,7 +29,7 @@ export * from './types.ts'
 export const name = 'channel-wecom'
 
 /** Host services that must exist before this connector can serve traffic. */
-export const inject = ['agents', 'credentials', 'permissionPresets', 'sessionPersistence']
+export const inject = ['agentDefaultModel', 'agents', 'credentials', 'permissionPresets', 'sessionPersistence']
 
 /** One robot account served over the WeCom long connection. */
 export interface Config {
@@ -153,6 +153,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       model: config.modelId,
       ...config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens },
     }
+  const modelSelection = agentOptions === undefined
+    ? undefined
+    : { provider: agentOptions.provider, model: agentOptions.model }
   const botId = await resolveCredential(ctx, config.botIdRef)
   const secret = await resolveCredential(ctx, config.secretRef)
   const admitted = new Set(config.allowFrom)
@@ -165,6 +168,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ...config.agentPreset === undefined ? {} : { agentPreset: config.agentPreset },
     permissionPreset: config.permissionPreset,
     ...agentOptions === undefined ? {} : { agentOptions },
+    ...modelSelection === undefined ? {} : { modelSelection },
   })
   const logger: Logger = {
     debug: message => { ctx.logger.debug(message) },
@@ -191,7 +195,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (inbound === undefined) return
     if (await handleApproval(frame, inbound)) return
     if (!(await admitSender(frame, inbound))) return
-    if (seen.has(inbound.messageId)) return
+    if (seen.has(inbound.messageId)) {
+      ctx.logger.debug(`wecom channel: duplicate frame ${inbound.messageId} ignored`)
+      return
+    }
     seen.add(inbound.messageId)
     seenOrder.push(inbound.messageId)
     if (seenOrder.length > SEEN_LIMIT) {
@@ -199,17 +206,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (evicted !== undefined) seen.delete(evicted)
     }
     const agent = await binder.resolve(inbound.conversationId)
+    ctx.logger.debug(`wecom channel: conversation ${inbound.conversationId} bound to ${agent.session.id}`)
     replies.begin(inbound.conversationId, frame, agent.session.id)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: inbound.text }],
-      source: {
-        kind: 'wecom',
-        accountId: config.accountId,
-        conversationId: inbound.conversationId,
-        senderId: inbound.senderId,
-        messageId: inbound.messageId,
-      },
-    }))
+    try {
+      agent.followup(createUserMessage({
+        content: [{ type: 'text', text: inbound.text }],
+        source: {
+          kind: 'wecom',
+          accountId: config.accountId,
+          conversationId: inbound.conversationId,
+          senderId: inbound.senderId,
+          messageId: inbound.messageId,
+        },
+      }))
+      ctx.logger.debug(`wecom channel: admitted message ${inbound.messageId} into ${agent.session.id}`)
+    } catch (error: unknown) {
+      ctx.logger.error(`wecom channel: followup failed: ${errorChain(error)}`)
+    }
   }
 
   async function handleApproval(frame: WsFrame<BaseMessage>, inbound: WeComInbound): Promise<boolean> {
