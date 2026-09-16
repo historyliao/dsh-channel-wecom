@@ -49,7 +49,7 @@ Set `WECOM_BOT_ID` and `WECOM_BOT_SECRET` in the environment, `$DSH_HOME/.creden
 
 ## Build
 
-`devDependencies` link to a local DeepSeek Harness checkout because the `@deepseek-ai/*` packages are not published at a matching version line. Point them at your own checkout, then:
+The DeepSeek Harness packages this plugin compiles against are published at the `0.1.5-rc.2` line, so a clean checkout builds on its own:
 
 ```sh
 pnpm install
