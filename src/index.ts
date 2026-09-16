@@ -119,7 +119,7 @@ function normalize(message: BaseMessage): WeComInbound | undefined {
 
 /** Reply shown to a sender who is waiting for approval. */
 function pairingPrompt(senderId: string, code: string): string {
-  return `您的企业微信用户ID：${senderId}\n配对码：${code}\n\n请让管理员批准该配对码后再发消息。`
+  return `您的企业微信用户ID：${senderId}\n配对码：${code}\n\n请回复「approve ${code}」完成配对，之后即可正常对话。`
 }
 
 /** Resolve one required credential, failing loud when the reference is unset. */
