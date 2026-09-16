@@ -75,16 +75,31 @@ export class WeComSessionBinder {
       return live
     }
     const setup = await this.composedSetup()
-    const stored = await this.ctx.sessionPersistence.stat(sessionId)
-    const handle = stored === undefined
-      ? await this.create(sessionId, setup)
-      : await this.ctx.agents.resume({
+    const handle = await this.isStored(sessionId)
+      ? await this.ctx.agents.resume({
         resumeSessionId: sessionId,
         ...this.options.agentOptions === undefined ? {} : { agentOptions: this.options.agentOptions },
         setup,
       })
+      : await this.create(sessionId, setup)
     this.bindings.set(conversationId, { agent: handle.agent, handle })
     return handle.agent
+  }
+
+  /**
+   * Whether a stored Session exists, across persistence backend versions.
+   * `stat` answers directly where the backend provides it; older backends
+   * answer through `list`.
+   * @param sessionId - durable identity to look up.
+   * @returns true when the Session can be resumed instead of created.
+   */
+  private async isStored(sessionId: SessionId): Promise<boolean> {
+    const persistence = this.ctx.sessionPersistence
+    if (typeof persistence.stat === 'function') {
+      return await persistence.stat(sessionId) !== undefined
+    }
+    const snapshots = await persistence.list()
+    return snapshots.some(snapshot => snapshot.header.id === sessionId)
   }
 
   /** Dispose every Agent this binder created; already-live Agents stay with their owner. */
